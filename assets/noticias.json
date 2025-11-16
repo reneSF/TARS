@@ -1,0 +1,12 @@
+{
+  "items": [
+    {
+      "title": "Noticias - TARS",
+      "summary": "Bienvenido al sistema TARS. Noticias de prueba para la demo."
+    },
+    {
+      "title": "Actualización sistema",
+      "summary": "Se ha actualizado el módulo de visualización. Verifique sensores."
+    }
+  ]
+}

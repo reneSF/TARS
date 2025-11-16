@@ -1,0 +1,14 @@
+{
+    "nombre": "Juan Pérez",
+    "foto": "juan.png",
+    "signos": {
+        "temperatura": 36.7,
+        "presion": "118/75",
+        "glucosa": 92,
+        "pulso": 78,
+        "oxigeno": 97,
+        "lactato": 1.5,
+        "cetonas": 0.4,
+        "colesterol": 168
+    }
+}

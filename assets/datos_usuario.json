@@ -1,0 +1,14 @@
+{
+  "nombre": "René López",
+  "foto": "usuario.jpg",
+  "vitales": {
+    "temperatura": 36.8,
+    "presion": "120/80",
+    "glucosa": 95,
+    "pulso": 74,
+    "oxigeno": 98,
+    "lactato": 1.1,
+    "cetonas": 0.3,
+    "colesterol": 180
+  }
+}

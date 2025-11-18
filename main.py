@@ -487,17 +487,22 @@ class TARSApp(App):
         # ensure assets folder exists
         if not os.path.exists(self.assets_folder):
             os.makedirs(self.assets_folder)
-        Builder.load_string(KV)
-        self.sm = self.root
+
+        # Load KV and capture the root widget that KV creates (ScreenManager)
+        root = Builder.load_string(KV)
+        self.sm = root  # guarda referencia al ScreenManager para uso posterior
+
         # set screen order
         self.screen_list = ['welcome','user','vitals','restart']
-        # enable touch-friendly behavior
+
+        # enable fullscreen (puedes comentar si no lo quieres)
         Window.fullscreen = True
-        return self.sm
+
+        return root
 
     def on_start(self):
-        # schedule initial show
-        Clock.schedule_once(lambda dt: self.go_to('welcome'), 0.1)
+        # schedule switching to welcome after build is complete
+        Clock.schedule_once(lambda dt: self.go_to('welcome'), 0.2)
 
     def go_to(self, name):
         if name in self.screen_list:

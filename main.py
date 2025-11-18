@@ -17,13 +17,15 @@ Window.clearcolor = (0.02, 0.02, 0.02, 1)
 # Window.size = (1080, 1920)
 
 KV = r'''
+#:import FadeTransition kivy.uix.screenmanager.FadeTransition
 #:import rgba kivy.utils.get_color_from_hex
+#:import dp kivy.metrics.dp
 
 <SideButton@Button>:
     size_hint: None, None
     size: dp(80), dp(160)
     background_normal: ''
-    background_color: rgba('#00121f') if root_direction == 'left' else rgba('#00121f')
+    background_color: rgba('#00121f')   # color estático
     color: rgba('#00FFFF')
     bold: True
     font_size: '20sp'
@@ -37,6 +39,9 @@ KV = r'''
     height: self.texture_size[1] + dp(10)
 
 <StatCard@BoxLayout>:
+    # propiedades que usará la plantilla
+    label: ""
+    value: ""
     orientation: 'vertical'
     size_hint: None, None
     size: dp(420), dp(180)
@@ -49,19 +54,21 @@ KV = r'''
             pos: self.pos
             size: self.size
             radius: [12,]
-    Label:
-        id=label_name
-        text: root.label
-        size_hint_y: None
-        height: self.texture_size[1]
-        color: rgba('#9efcff')
-        font_size: '18sp'
-    Label:
-        id=value
-        text: root.value
-        font_size: '38sp'
-        color: rgba('#00ffff')
-        bold: True
+
+    # Contenido de la tarjeta (fuera de canvas.before)
+        Label:
+            text: root.label
+            size_hint_y: None
+            height: self.texture_size[1]
+            color: rgba('#9efcff')
+            font_size: '18sp'
+
+        Label:
+            text: root.value
+            font_size: '38sp'
+            color: rgba('#00ffff')
+            bold: True
+
 
 ScreenManager:
     id: sm
@@ -187,19 +194,22 @@ ScreenManager:
         spacing: dp(8)
 
         Label:
-            text: 'Panel Vitales'
+            text: 'PANEL DE VITALES'
             font_size: '30sp'
             color: rgba('#7CFC00')
             size_hint_y: None
             height: self.texture_size[1] + dp(8)
 
-        GridLayout:
-            id: cards
-            cols: 1
-            size_hint_y: None
-            height: self.minimum_height
-            padding: dp(12)
-            spacing: dp(12)
+        ScrollView:
+            size_hint_y: 1
+            do_scroll_x: False
+            GridLayout:
+                id: cards
+                cols: 1
+                size_hint_y: None
+                height: self.minimum_height
+                padding: dp(12)
+                spacing: dp(12)
 
     SideButton:
         root_direction: 'left'
@@ -306,20 +316,98 @@ class UserScreen(Screen):
 
 class VitalsScreen(Screen):
     vitals = DictProperty({})
+    update_interval = 3.0  # segundos, puedes cambiarlo
+
+    # rangos y umbrales para coloración (valores normales/precaución/peligro)
+    thresholds = {
+        'temperatura': (35.0, 37.5, 39.0),  # (minNormal, maxNormal, danger)
+        'glucosa': (70, 140, 250),
+        'pulso': (50, 100, 140),
+        'oxigeno': (92, 97, 100),  # oxígeno normal >92
+        'lactato': (0.5, 2.0, 4.0),
+        'cetonas': (0.0, 0.6, 1.5),
+        'colesterol': (125, 200, 240),
+        'presion_systolic': (90, 120, 160)  # para estimar presión
+    }
 
     def on_enter(self):
+        # cargar inmediatamente y luego programar refresco periódico
         self.load_vitals()
+        # cancelar previas en caso de múltiples entradas
+        Clock.unschedule(self._scheduled_reload) if hasattr(self,'_scheduled_reload') else None
+        self._scheduled_reload = Clock.schedule_interval(lambda dt: self.load_vitals(), self.update_interval)
+
+    def on_leave(self):
+        # cancelar refresco cuando salgamos de la pantalla
+        if hasattr(self, '_scheduled_reload'):
+            Clock.unschedule(self._scheduled_reload)
+
+    def get_percent(self, key, value):
+        # mapear valor numérico a porcentaje (0-100) según rango lógico
+        try:
+            if key == 'temperatura':
+                # map 34-42
+                v = float(value)
+                percent = int((v - 34.0) / (42.0 - 34.0) * 100)
+            elif key == 'glucosa':
+                v = float(value); percent = int((v - 40) / (400 - 40) * 100)
+            elif key == 'pulso':
+                v = float(value); percent = int((v - 30) / (200 - 30) * 100)
+            elif key == 'oxigeno':
+                v = float(value); percent = int((v - 50) / (100 - 50) * 100)
+            elif key == 'lactato':
+                v = float(value); percent = int((v) / 15.0 * 100)
+            elif key == 'cetonas':
+                v = float(value); percent = int((v) / 10.0 * 100)
+            elif key == 'colesterol':
+                v = float(value); percent = int((v - 100) / (400 - 100) * 100)
+            elif key == 'presion':
+                # expect "SYS/DIA", compute based on SYS
+                parts = str(value).split('/')
+                sys = float(parts[0]) if parts and parts[0].isdigit() else 120.0
+                percent = int((sys - 60) / (200 - 60) * 100)
+            else:
+                percent = 0
+        except Exception:
+            percent = 0
+        # clamp
+        if percent < 0: percent = 0
+        if percent > 100: percent = 100
+        return percent
+
+    def get_color_for(self, key, value):
+        # devuelve color rgba (r,g,b,a) según umbrales
+        try:
+            t = self.thresholds
+            if key == 'presion':
+                parts = str(value).split('/')
+                val = float(parts[0]) if parts and parts[0].isdigit() else 120.0
+                minN, maxN, danger = t['presion_systolic']
+            else:
+                minN, maxN, danger = t.get(key, (0, 1, 2))
+                val = float(value)
+        except Exception:
+            return (0.0, 1.0, 0.9, 1)
+
+        # color logic: green (normal), yellow (caution), red (danger)
+        if val <= maxN:
+            return (0.0, 1.0, 0.9, 1)  # holographic green
+        elif val <= danger:
+            return (1.0, 0.8, 0.0, 1)  # amber
+        else:
+            return (1.0, 0.2, 0.2, 1)  # red
 
     def load_vitals(self):
-        self.vitals = {}
+        # lee JSON y actualiza la UI
         assets = App.get_running_app().assets_folder
         p = os.path.join(assets, 'datos_usuario.json')
         try:
             if os.path.exists(p):
-                d = json.load(open(p, 'r', encoding='utf-8'))
-                self.vitals = d.get('vitales', {})
+                with open(p, 'r', encoding='utf-8') as fh:
+                    d = json.load(fh)
+                    self.vitals = d.get('vitales', {})
             else:
-                # default demo values
+                # valores predeterminados de demostración
                 self.vitals = {
                     'temperatura': 36.7,
                     'presion': '120/80',
@@ -333,13 +421,17 @@ class VitalsScreen(Screen):
         except Exception as e:
             print("Error cargando vitals:", e)
             self.vitals = {}
-        # populate cards
+
+        # actualizar tarjetas
+        self.populate_cards()
+
+    def populate_cards(self):
         grid = self.ids.cards
         grid.clear_widgets()
-        # order for presentation
+
         order = [
             ('Temperatura', 'temperatura', '°C'),
-            ('Presión arterial', 'presion', ''),
+            ('Presión arterial (SYS/DIA)', 'presion', ''),
             ('Glucosa', 'glucosa', 'mg/dL'),
             ('Pulso', 'pulso', 'BPM'),
             ('Oxigenación', 'oxigeno', '%'),
@@ -347,22 +439,42 @@ class VitalsScreen(Screen):
             ('Cetonas', 'cetonas', 'mmol/L'),
             ('Colesterol', 'colesterol', 'mg/dL')
         ]
+
         for label, key, unit in order:
             value = self.vitals.get(key, '--')
+            percent = self.get_percent(key, value if value != '--' else 0)
+            color = self.get_color_for(key, value if value != '--' else 0)
+
+            # create layout for the metric
             from kivy.uix.boxlayout import BoxLayout
             from kivy.uix.label import Label
-            box = BoxLayout(orientation='horizontal', size_hint_y=None, height='60dp', padding=10)
-            # left label
-            l = Label(text=label, size_hint_x=0.6, halign='left', valign='middle', markup=True)
-            l.text_size = (self.width * 0.6 - 20, None)
-            l.color = (0.8,1,1,1)
+            from kivy.uix.progressbar import ProgressBar
+            from kivy.uix.widget import Widget
+            box = BoxLayout(orientation='vertical', size_hint_y=None, height='110dp', padding=(10,8))
+            # top row: label and numeric value
+            top = BoxLayout(orientation='horizontal', size_hint_y=None, height='30dp')
+            l = Label(text=label, halign='left', valign='middle', size_hint_x=0.65, markup=True)
+            l.color = (0.7, 1, 0.95, 1)
             l.font_size = '18sp'
-            # right value
-            v = Label(text=f"[b]{value} {unit}[/b]", size_hint_x=0.4, halign='right', valign='middle', markup=True)
-            v.color = (0.0,1,0.9,1)
+            v = Label(text=f"[b]{value} {unit}[/b]", halign='right', valign='middle', size_hint_x=0.35, markup=True)
+            v.color = color
             v.font_size = '22sp'
-            box.add_widget(l)
-            box.add_widget(v)
+            top.add_widget(l)
+            top.add_widget(v)
+            # progress bar row
+            pb_row = BoxLayout(orientation='horizontal', size_hint_y=None, height='40dp', padding=(0,6))
+            pb_bg = Widget(size_hint_x=1)
+            # progress visual: use Kivy ProgressBar
+            pb = ProgressBar(max=100, value=percent)
+            pb.size_hint_x = 0.98
+            # overlay label percent
+            pct = Label(text=f"{percent}%", size_hint_x=0.18, halign='right', valign='middle', markup=True)
+            pct.color = (0.8, 1, 0.9, 1)
+            pct.font_size = '16sp'
+            pb_row.add_widget(pb)
+            pb_row.add_widget(pct)
+            box.add_widget(top)
+            box.add_widget(pb_row)
             grid.add_widget(box)
 
 class RestartScreen(Screen):
